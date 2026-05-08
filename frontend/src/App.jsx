@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const initialMessages = [
   {
@@ -19,7 +19,28 @@ const STATUS_TEXT = {
   error: "error",
 };
 
+function estimateTextTokens(text) {
+  if (!text) return 0;
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function estimateMessageTokens(items) {
+  const perMessageOverhead = 4;
+  const trailingOverhead = 2;
+  return (
+    items.reduce((sum, item) => sum + estimateTextTokens(item.text || "") + perMessageOverhead, 0) +
+    trailingOverhead
+  );
+}
+
+function tokenWarningLevel(ratio) {
+  if (ratio >= 0.9) return "critical";
+  if (ratio >= 0.75) return "warning";
+  return "ok";
+}
+
 export default function App() {
+  const chatPanelRef = useRef(null);
   const [messages, setMessages] = useState(initialMessages);
   const [threads, setThreads] = useState([]);
   const [selectedThreadId, setSelectedThreadId] = useState("");
@@ -27,12 +48,69 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("idle");
   const [activity, setActivity] = useState("");
+  const [runtimeConfig, setRuntimeConfig] = useState({
+    model: "unknown",
+    context_limit: 4096,
+    max_output_tokens: 512,
+    retrieval_k: 3,
+    retrieval_candidates: 10,
+    rerank_enabled: true,
+    token_estimator: "approx_chars_div_4",
+  });
+  const [lastTokenBudget, setLastTokenBudget] = useState(null);
 
   const canSend = useMemo(() => input.trim().length > 0 && !busy, [input, busy]);
+  const livePromptTokens = useMemo(() => {
+    const promptMessages = [...messages, { role: "user", text: input.trim() }];
+    return estimateMessageTokens(promptMessages);
+  }, [messages, input]);
+  const projectedWithMaxOutput = livePromptTokens + runtimeConfig.max_output_tokens;
+  const projectedRatio = projectedWithMaxOutput / Math.max(1, runtimeConfig.context_limit);
+  const projectedWarning = tokenWarningLevel(projectedRatio);
+
+  function scrollChatToBottom() {
+    const panel = chatPanelRef.current;
+    if (!panel) return;
+    panel.scrollTop = panel.scrollHeight;
+  }
 
   useEffect(() => {
     initializeThreads();
+    loadRuntimeConfig();
   }, []);
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(scrollChatToBottom);
+    return () => window.cancelAnimationFrame(id);
+  }, [messages]);
+
+  useEffect(() => {
+    function onFocusOrVisible() {
+      if (document.visibilityState === "visible") {
+        window.requestAnimationFrame(scrollChatToBottom);
+      }
+    }
+
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    return () => {
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+    };
+  }, []);
+
+  async function loadRuntimeConfig() {
+    try {
+      const resp = await fetch("/api/runtime-config");
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.detail || "Failed to load runtime config");
+      }
+      setRuntimeConfig(data);
+    } catch {
+      // Keep safe defaults if runtime config is unavailable.
+    }
+  }
 
   async function initializeThreads() {
     setStatus("loading");
@@ -78,6 +156,7 @@ export default function App() {
     }
 
     setMessages(data.map((m) => ({ role: m.role, text: m.content, grounded: false, sources: [] })));
+    setLastTokenBudget(null);
   }
 
   async function onThreadChange(e) {
@@ -127,6 +206,7 @@ export default function App() {
           sources: [],
         },
       ]);
+      setLastTokenBudget(null);
       setStatus("idle");
       setActivity("");
     } catch (err) {
@@ -173,8 +253,10 @@ export default function App() {
           grounded: Boolean(data.grounded),
           sources: data.used_sources || [],
           retrievalCount: data.retrieval_count || 0,
+          tokenBudget: data.token_budget || null,
         },
       ]);
+      setLastTokenBudget(data.token_budget || null);
       setStatus("idle");
       setActivity(
         data.grounded
@@ -244,6 +326,39 @@ export default function App() {
         </div>
       </section>
 
+      <section className={`token-strip ${projectedWarning}`}>
+        <div className="token-head">
+          <strong>Token Budget</strong>
+          <span>
+            est prompt {livePromptTokens} + max output {runtimeConfig.max_output_tokens} = {projectedWithMaxOutput} /
+            {" "}
+            {runtimeConfig.context_limit}
+          </span>
+        </div>
+        <div className="token-meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, Math.round(projectedRatio * 100))}>
+          <div className="token-fill" style={{ width: `${Math.min(100, Math.round(projectedRatio * 100))}%` }} />
+        </div>
+        <div className="token-foot">
+          <span>
+            Model: {runtimeConfig.model} | Retrieval: top {runtimeConfig.retrieval_k} from {runtimeConfig.retrieval_candidates}
+            {runtimeConfig.rerank_enabled ? " (reranked)" : ""}
+          </span>
+          <span className={`token-warning ${projectedWarning}`}>
+            {projectedWarning === "critical"
+              ? "Near context limit: responses may truncate or lose context."
+              : projectedWarning === "warning"
+                ? "Approaching context limit."
+                : "Context budget healthy."}
+          </span>
+        </div>
+        {lastTokenBudget ? (
+          <div className="token-last">
+            Last reply used ~{lastTokenBudget.prompt_tokens} prompt + {lastTokenBudget.completion_tokens} completion tokens
+            (total {lastTokenBudget.total_tokens}).
+          </div>
+        ) : null}
+      </section>
+
       <section className="composer-wrap">
         <button className="ghost" disabled={busy} onClick={createNewThread}>
           New Thread
@@ -259,7 +374,7 @@ export default function App() {
         </div>
       </section>
 
-      <main className="chat-panel">
+      <main ref={chatPanelRef} className="chat-panel">
         {messages.map((m, i) => (
           <article key={`${m.role}-${i}`} className={`bubble ${m.role}`}>
             <div className="label">{m.role}</div>
@@ -282,6 +397,11 @@ export default function App() {
             ) : null}
             {m.role === "assistant" && m.grounded === false && !m.text.startsWith("Error:") ? (
               <div className="ungrounded-note">No matching local source was attached to this answer.</div>
+            ) : null}
+            {m.role === "assistant" && m.tokenBudget ? (
+              <div className="token-note">
+                est tokens: prompt {m.tokenBudget.prompt_tokens}, completion {m.tokenBudget.completion_tokens}, total {m.tokenBudget.total_tokens}
+              </div>
             ) : null}
           </article>
         ))}

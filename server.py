@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from threading import Lock
 
 from fastapi import FastAPI, HTTPException
@@ -12,7 +13,13 @@ from pydantic import BaseModel, Field
 
 from agent import (
     DEFAULT_THREAD_ID,
+    ENABLE_LOCAL_RERANK,
+    inspect_source_chunk,
     LLM_MODEL,
+    LLM_NUM_CTX,
+    LLM_NUM_PREDICT,
+    LLM_OPTIONS,
+    RETRIEVAL_CANDIDATES,
     RETRIEVAL_K,
     append_chat,
     create_thread,
@@ -24,6 +31,7 @@ from agent import (
     parse_source_dirs,
     recent_chat_records,
     recent_chat_messages,
+    rerank_documents,
     safe_calculate,
 )
 
@@ -39,6 +47,17 @@ class ChatResponse(BaseModel):
     grounded: bool
     retrieval_count: int
     used_sources: list[dict[str, str | int]]
+    token_budget: dict[str, str | int | float]
+
+
+class RuntimeConfigResponse(BaseModel):
+    model: str
+    context_limit: int
+    max_output_tokens: int
+    retrieval_k: int
+    retrieval_candidates: int
+    rerank_enabled: bool
+    token_estimator: str
 
 
 class ThreadCreateRequest(BaseModel):
@@ -60,6 +79,31 @@ class ThreadMessageResponse(BaseModel):
 class ReindexResponse(BaseModel):
     changed_files: int
     chunks_indexed: int
+
+
+def estimate_text_tokens(text: str) -> int:
+    # Lightweight approximation for local UI telemetry without extra tokenizer deps.
+    if not text:
+        return 0
+    return max(1, math.ceil(len(text) / 4))
+
+
+def estimate_message_tokens(messages: list[dict[str, str]]) -> int:
+    # Add a small per-message overhead to account for role/format framing.
+    per_message_overhead = 4
+    trailing_overhead = 2
+    return sum(estimate_text_tokens(m.get("content", "")) + per_message_overhead for m in messages) + trailing_overhead
+
+
+def classify_token_pressure(projected_total: int, context_limit: int) -> tuple[str, float]:
+    if context_limit <= 0:
+        return "unknown", 0.0
+    ratio = projected_total / context_limit
+    if ratio >= 0.9:
+        return "critical", ratio
+    if ratio >= 0.75:
+        return "warning", ratio
+    return "ok", ratio
 
 
 def serialize_sources(docs: list) -> list[dict[str, str | int]]:
@@ -87,7 +131,7 @@ def build_runtime() -> tuple:
     finally:
         startup_conn.close()
 
-    llm = ChatOllama(model=LLM_MODEL)
+    llm = ChatOllama(model=LLM_MODEL, **LLM_OPTIONS)
 
     @tool
     def calculator(expression: str) -> str:
@@ -97,7 +141,8 @@ def build_runtime() -> tuple:
     @tool
     def retrieve_context(query: str) -> str:
         """Search local indexed files for context relevant to the user's question."""
-        docs = vectorstore.similarity_search(query, k=RETRIEVAL_K)
+        candidate_docs = vectorstore.similarity_search(query, k=RETRIEVAL_CANDIDATES)
+        docs = rerank_documents(query, candidate_docs, top_k=RETRIEVAL_K) if ENABLE_LOCAL_RERANK else candidate_docs[:RETRIEVAL_K]
         return format_docs_for_prompt(docs)
 
     @tool
@@ -110,14 +155,32 @@ def build_runtime() -> tuple:
         finally:
             tool_conn.close()
 
+    @tool
+    def source_inspector(spec_json: str) -> str:
+        """Inspect a source/chunk with expanded context.
+
+        Input JSON: {"source": "<absolute_path>", "chunk": <int>, "radius": <int optional>}.
+        """
+        try:
+            spec = json.loads(spec_json or "{}")
+            source = str(spec.get("source", "")).strip()
+            chunk = int(spec.get("chunk", 0))
+            radius = int(spec.get("radius", 1))
+            if not source:
+                return "Error: source is required."
+            return inspect_source_chunk(source=source, chunk=chunk, radius=radius)
+        except Exception as e:
+            return f"Error: invalid source_inspector input: {e}"
+
     system_prompt = (
         "You are a local assistant with access to tools. "
         "Use retrieve_context when questions might depend on local files. "
+        "Use source_inspector to fetch expanded chunk context when retrieval snippets are not enough. "
         "When using retrieved text, cite the [n] source labels you were given."
     )
     agent = create_agent(
         model=llm,
-        tools=[calculator, retrieve_context, reindex_knowledge_base],
+        tools=[calculator, retrieve_context, source_inspector, reindex_knowledge_base],
         system_prompt=system_prompt,
     )
     return agent, reindex_knowledge_base, vectorstore
@@ -153,6 +216,19 @@ def on_shutdown() -> None:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/runtime-config", response_model=RuntimeConfigResponse)
+def runtime_config() -> RuntimeConfigResponse:
+    return RuntimeConfigResponse(
+        model=LLM_MODEL,
+        context_limit=LLM_NUM_CTX,
+        max_output_tokens=LLM_NUM_PREDICT,
+        retrieval_k=RETRIEVAL_K,
+        retrieval_candidates=RETRIEVAL_CANDIDATES,
+        rerank_enabled=ENABLE_LOCAL_RERANK,
+        token_estimator="approx_chars_div_4",
+    )
 
 
 @app.get("/api/threads", response_model=list[ThreadResponse])
@@ -210,7 +286,8 @@ def chat(req: ChatRequest) -> ChatResponse:
             messages = history + [{"role": "user", "content": req.message}]
             docs = []
             if chat_vectorstore is not None:
-                docs = chat_vectorstore.similarity_search(req.message, k=RETRIEVAL_K)
+                candidate_docs = chat_vectorstore.similarity_search(req.message, k=RETRIEVAL_CANDIDATES)
+                docs = rerank_documents(req.message, candidate_docs, top_k=RETRIEVAL_K) if ENABLE_LOCAL_RERANK else candidate_docs[:RETRIEVAL_K]
                 context = format_docs_for_prompt(docs)
                 if context != "No relevant context found.":
                     messages = [
@@ -224,9 +301,15 @@ def chat(req: ChatRequest) -> ChatResponse:
                         },
                         *messages,
                     ]
+
+            prompt_tokens = estimate_message_tokens(messages)
             response = agent.invoke({"messages": messages})
             final_message = response["messages"][-1]
             answer = final_message.content if hasattr(final_message, "content") else str(final_message)
+            completion_tokens = estimate_text_tokens(answer)
+            total_tokens = prompt_tokens + completion_tokens
+            projected_with_max_output = prompt_tokens + LLM_NUM_PREDICT
+            warning_level, utilization_ratio = classify_token_pressure(projected_with_max_output, LLM_NUM_CTX)
             used_sources = serialize_sources(docs)
             append_chat(chat_conn, "user", req.message, thread_id=req.thread_id)
             append_chat(chat_conn, "assistant", answer, thread_id=req.thread_id)
@@ -236,6 +319,17 @@ def chat(req: ChatRequest) -> ChatResponse:
                 grounded=bool(used_sources),
                 retrieval_count=len(used_sources),
                 used_sources=used_sources,
+                token_budget={
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "context_limit": LLM_NUM_CTX,
+                    "max_output_tokens": LLM_NUM_PREDICT,
+                    "projected_with_max_output": projected_with_max_output,
+                    "utilization_ratio": round(utilization_ratio, 4),
+                    "warning_level": warning_level,
+                    "estimator": "approx_chars_div_4",
+                },
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e

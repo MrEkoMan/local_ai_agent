@@ -87,7 +87,8 @@ body {
 .topbar,
 .chat-panel,
 .composer-wrap,
-.activity-strip {
+.activity-strip,
+.token-strip {
   position: relative;
   z-index: 1;
 }
@@ -165,6 +166,82 @@ body {
 .activity-indicator.active {
   background: var(--accent);
   animation: pulse 1.4s ease-out infinite;
+}
+
+.token-strip {
+  padding: 12px 14px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 88%, black 12%);
+}
+
+.token-head,
+.token-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.token-head strong {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.token-head span,
+.token-foot span,
+.token-last,
+.token-note {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.token-meter {
+  margin-top: 8px;
+  margin-bottom: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #0f1a26;
+  border: 1px solid var(--panel-edge);
+  overflow: hidden;
+}
+
+.token-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--accent), #71e6c6);
+  transition: width 0.2s ease;
+}
+
+.token-strip.warning .token-fill {
+  background: linear-gradient(90deg, var(--accent-2), #f2d18a);
+}
+
+.token-strip.critical .token-fill {
+  background: linear-gradient(90deg, #ff9d6b, var(--danger));
+}
+
+.token-warning.ok {
+  color: var(--accent);
+}
+
+.token-warning.warning {
+  color: var(--accent-2);
+}
+
+.token-warning.critical {
+  color: var(--danger);
+}
+
+.token-last {
+  margin-top: 8px;
+}
+
+.token-note {
+  margin-top: 10px;
 }
 
 @keyframes pulse {
@@ -337,6 +414,12 @@ body {
 @media (max-width: 700px) {
   .app-shell {
     padding: 12px;
+  }
+
+  .token-head,
+  .token-foot {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .composer-wrap {
