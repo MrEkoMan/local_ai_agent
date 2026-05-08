@@ -1,0 +1,349 @@
+:root {
+  --bg: #0a1118;
+  --panel: #121d28;
+  --panel-edge: #24374a;
+  --ink: #e8eff7;
+  --muted: #9bb1c7;
+  --accent: #37d2a7;
+  --accent-2: #f2b84b;
+  --danger: #ff6b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at 15% 20%, #15324e 0, transparent 45%),
+    radial-gradient(circle at 80% 85%, #4e2a10 0, transparent 42%),
+    var(--bg);
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  max-width: 980px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 16px;
+  padding: 20px;
+  position: relative;
+}
+
+.ambient {
+  position: absolute;
+  filter: blur(70px);
+  opacity: 0.25;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.a1 {
+  width: 220px;
+  height: 220px;
+  background: var(--accent);
+  top: -50px;
+  right: -30px;
+  animation: driftA 7s ease-in-out infinite;
+}
+
+.a2 {
+  width: 240px;
+  height: 240px;
+  background: #52a9ff;
+  bottom: -80px;
+  left: -50px;
+  animation: driftB 9s ease-in-out infinite;
+}
+
+@keyframes driftA {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(18px);
+  }
+}
+
+@keyframes driftB {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(22px);
+  }
+}
+
+.topbar,
+.chat-panel,
+.composer-wrap,
+.activity-strip {
+  position: relative;
+  z-index: 1;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: clamp(1.3rem, 2.5vw, 2rem);
+  letter-spacing: 0.02em;
+}
+
+.status {
+  font-family: "JetBrains Mono", monospace;
+  text-transform: uppercase;
+  font-size: 0.74rem;
+  border: 1px solid var(--panel-edge);
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.status.thinking,
+.status.reindexing {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+.status.error {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.activity-strip {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 86%, black 14%);
+}
+
+.activity-strip strong,
+.activity-strip span {
+  display: block;
+}
+
+.activity-strip strong {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.activity-strip span {
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.activity-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 0 rgba(55, 210, 167, 0);
+}
+
+.activity-indicator.active {
+  background: var(--accent);
+  animation: pulse 1.4s ease-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(55, 210, 167, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(55, 210, 167, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(55, 210, 167, 0);
+  }
+}
+
+.chat-panel {
+  border: 1px solid var(--panel-edge);
+  border-radius: 16px;
+  padding: 16px;
+  background: color-mix(in srgb, var(--panel) 88%, black 12%);
+  overflow: auto;
+  max-height: calc(100vh - 220px);
+}
+
+.bubble {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-edge);
+  animation: rise 0.25s ease-out both;
+}
+
+.bubble.user {
+  background: color-mix(in srgb, #203d5d 70%, var(--panel) 30%);
+}
+
+.bubble.assistant {
+  background: color-mix(in srgb, #1f3e35 55%, var(--panel) 45%);
+}
+
+.bubble .label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.bubble p {
+  margin: 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.sources-panel {
+  margin-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-edge) 80%, transparent 20%);
+  padding-top: 10px;
+}
+
+.sources-panel summary {
+  cursor: pointer;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.sources-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.source-card {
+  border: 1px solid color-mix(in srgb, var(--panel-edge) 75%, transparent 25%);
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, #101924 85%, black 15%);
+}
+
+.source-path,
+.source-meta,
+.ungrounded-note {
+  font-family: "JetBrains Mono", monospace;
+}
+
+.source-path {
+  font-size: 0.72rem;
+  color: var(--ink);
+  word-break: break-all;
+}
+
+.source-meta {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.source-card p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.ungrounded-note {
+  margin-top: 10px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.composer-wrap {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+}
+
+.ghost,
+.composer button {
+  border: 1px solid var(--panel-edge);
+  background: #172738;
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-family: "JetBrains Mono", monospace;
+  cursor: pointer;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.composer input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge);
+  background: #0f1a26;
+  color: var(--ink);
+  font: inherit;
+}
+
+.composer select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge);
+  background: #0f1a26;
+  color: var(--ink);
+  font: inherit;
+}
+
+.composer button:disabled,
+.ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 700px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .composer-wrap {
+    grid-template-columns: 1fr;
+  }
+
+  .composer {
+    grid-template-columns: 1fr;
+  }
+}
