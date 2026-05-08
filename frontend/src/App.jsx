@@ -149,8 +149,9 @@ export default function App() {
     setMessages((prev) => [...prev, { role: "user", text: question, grounded: false, sources: [] }]);
     setInput("");
 
+    let phaseTimer;
     try {
-      const phaseTimer = window.setTimeout(() => {
+      phaseTimer = window.setTimeout(() => {
         setStatus("generating");
         setActivity("Generating answer from retrieved context...");
       }, 700);
@@ -161,7 +162,6 @@ export default function App() {
         body: JSON.stringify({ message: question, thread_id: selectedThreadId }),
       });
       const data = await resp.json();
-      window.clearTimeout(phaseTimer);
       if (!resp.ok) {
         throw new Error(data.detail || "Request failed");
       }
@@ -189,6 +189,7 @@ export default function App() {
       setStatus("error");
       setActivity("Chat request failed.");
     } finally {
+      window.clearTimeout(phaseTimer);
       setBusy(false);
     }
   }
