@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local virtual environment
+.venv/
+
+# App runtime state (DB + vector store)
+.agent_store/
+
+# Frontend build output
+frontend/dist/
+
+# Optional local env files
+.env
+.env.*
+!.env.example
